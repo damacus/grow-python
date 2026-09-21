@@ -50,22 +50,57 @@ class Pump(object):
         with self._state_lock:
             if self._hardware_stopped:
                 return
-            self.stop()
-            self._pwm.stop()
-            GPIO.setup(self._gpio_pin, GPIO.IN)
-            self._hardware_stopped = True
 
-    def _set_speed_locked(self, speed):
+            graceful_error = None
+            try:
+                # Keep the global lock until both hard-teardown operations
+                # have confirmed that this pump no longer owns the output.
+                self._stop_locked(release_lock=False)
+            except Exception as error:
+                graceful_error = error
+
+            teardown_errors = []
+            try:
+                self._pwm.stop()
+            except Exception as error:
+                teardown_errors.append(error)
+            try:
+                GPIO.setup(self._gpio_pin, GPIO.IN)
+            except Exception as error:
+                teardown_errors.append(error)
+
+            if not teardown_errors:
+                self._hardware_stopped = True
+                self._speed = 0.0
+                self._release_global_lock()
+
+            # A failed graceful duty-cycle reset is still the most useful
+            # error to report when the hard teardown succeeded.  If it did
+            # not fail, report the first hard-teardown error so callers can
+            # retry while the pump still owns the global lock.
+            if graceful_error is not None:
+                raise graceful_error
+            if teardown_errors:
+                raise teardown_errors[0]
+
+    def _release_global_lock(self):
+        """Release the global lock when this pump owns it."""
+        global _global_lock_owner
+
+        with _global_lock_state:
+            if _global_lock_owner is self:
+                _global_lock_owner = None
+                global_lock.release()
+
+    def _set_speed_locked(self, speed, release_lock=True):
         """Set the speed while holding ``_state_lock``."""
         global _global_lock_owner
 
         if speed == 0:
             # Keep ownership until the hardware confirms that it stopped.
             self._pwm.ChangeDutyCycle(0)
-            with _global_lock_state:
-                if _global_lock_owner is self:
-                    _global_lock_owner = None
-                    global_lock.release()
+            if release_lock:
+                self._release_global_lock()
             self._speed = 0.0
             return True
 
@@ -81,9 +116,7 @@ class Pump(object):
             self._pwm.ChangeDutyCycle(int(PUMP_MAX_DUTY * speed))
         except Exception:
             if acquired:
-                with _global_lock_state:
-                    _global_lock_owner = None
-                    global_lock.release()
+                self._release_global_lock()
             raise
         self._speed = speed
         return True
@@ -103,13 +136,17 @@ class Pump(object):
     def stop(self):
         """Stop the pump."""
         with self._state_lock:
-            self._dose_generation += 1
-            timeout = self._timeout
-            self._timeout = None
-            self._dose_active = False
-            if timeout is not None:
-                timeout.cancel()
-            self._set_speed_locked(0)
+            self._stop_locked()
+
+    def _stop_locked(self, release_lock=True):
+        """Stop the pump while holding ``_state_lock``."""
+        self._dose_generation += 1
+        timeout = self._timeout
+        self._timeout = None
+        self._dose_active = False
+        if timeout is not None:
+            timeout.cancel()
+        self._set_speed_locked(0, release_lock=release_lock)
 
     def _timer_expired(self, generation):
         """Stop only the dose represented by ``generation``."""

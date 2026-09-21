@@ -43,11 +43,42 @@ def test_installer_rejects_missing_boot_config_before_creating_resources(tmp_pat
     assert not (tmp_path / "home" / "Pimoroni").exists()
 
 
+def test_installer_rejects_removed_python_option_before_host_checks(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    id_called = tmp_path / "id-was-called"
+    write_command(fake_bin, "id", f'touch "{id_called}"; printf "1000\\n"')
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "GROW_BOOT_ROOT": str(tmp_path),
+            "HOME": str(tmp_path / "home"),
+            "PATH": f"{fake_bin}:{environment['PATH']}",
+            "TERM": "dumb",
+        }
+    )
+    result = subprocess.run(
+        ["/bin/bash", str(INSTALLER), "--python", "/tmp/python"],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Unrecognised option: --python" in result.stdout
+    assert not id_called.exists()
+    assert not (tmp_path / "home" / "Pimoroni").exists()
+
+
 def test_mocked_install_updates_final_all_section_without_host_commands(tmp_path):
     boot_config = tmp_path / "boot" / "firmware" / "config.txt"
     boot_config.parent.mkdir(parents=True)
     boot_config.write_text(
-        "[pi4]\nunrelated=keep\n[all]\n"
+        "[all]\nunrelated=keep\n"
+        "[pi5]\n"
         "dtparam=spi=off\n"
         "dtparam=i2c_arm=off\n"
         "dtoverlay=spi0-cs,cs0_pin=8\n"
@@ -117,11 +148,15 @@ exec "$@"
 
     assert result.returncode == 0, result.stdout + result.stderr
     updated = boot_config.read_text()
+    assert "[all]\nunrelated=keep\n[pi5]\n" in updated
+    assert "dtparam=spi=off\ndtparam=i2c_arm=off\ndtoverlay=spi0-cs,cs0_pin=8\n" in updated
+    assert updated.rstrip().endswith(
+        "[all]\n"
+        "dtparam=i2c_arm=on\n"
+        "dtparam=spi=on\n"
+        "dtoverlay=spi0-cs,cs0_pin=14"
+    )
     assert "dtparam=i2c_arm=on\ndtparam=spi=on\n" in updated
-    assert updated.rstrip().endswith("dtoverlay=spi0-cs,cs0_pin=14")
-    assert "dtparam=spi=off" not in updated
-    assert "dtparam=i2c_arm=off" not in updated
-    assert "dtoverlay=spi0-cs,cs0_pin=8" not in updated
     assert "dtoverlay=spi0-cs-custom" in updated
 
     second = subprocess.run(

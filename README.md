@@ -21,6 +21,8 @@ curl -sSL https://get.pimoroni.com/grow | bash
 ```
 
 **Note** report issues with one-line installer here: https://github.com/pimoroni/get
+The one-line installer is maintained separately and currently excludes Debian.
+For Debian 13, use the checkout installation below.
 
 ## Install this checkout and configure dependencies:
 
@@ -32,6 +34,10 @@ Run the installer as your normal user. It creates a clean interactive
 environment at `$HOME/.virtualenvs/pimoroni` and installs the example Python
 dependencies. The service installer uses its separate root-owned environment at
 `/opt/grow-monitor/venv`.
+
+Run `./install.sh` from this checkout in either mode: it needs the bundled
+`scripts/install-native-gpio.sh` helper. Without `--unstable`, it installs the
+Python package from PyPI.
 
 The installer enables I2C and SPI and adds the following lines under the
 effective `[all]` section of the detected boot configuration:

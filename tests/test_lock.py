@@ -120,6 +120,54 @@ def test_pwm_shutdown_uses_zero_argument_stop(GPIO, smbus):
     pwm.stop.assert_called_once_with()
 
 
+def test_shutdown_hard_stops_after_duty_reset_failure(GPIO, smbus):
+    import grow.pump as pump_module
+    from grow.pump import Pump, global_lock
+
+    pwm = mock.Mock(spec=["start", "ChangeDutyCycle", "stop"])
+    GPIO.PWM.return_value = pwm
+    pump = Pump(channel=1)
+    assert pump.set_speed(0.5) is True
+    pwm.ChangeDutyCycle.side_effect = RuntimeError("duty-cycle failure")
+
+    with pytest.raises(RuntimeError, match="duty-cycle failure"):
+        pump._stop()
+
+    pwm.stop.assert_called_once_with()
+    GPIO.setup.assert_any_call(pump._gpio_pin, GPIO.IN)
+    assert pump._hardware_stopped is True
+    assert pump.get_speed() == 0
+    assert pump_module._global_lock_owner is None
+    assert global_lock.locked() is False
+
+
+def test_shutdown_can_retry_after_hard_teardown_failure(GPIO, smbus):
+    import grow.pump as pump_module
+    from grow.pump import Pump, global_lock
+
+    pwm = mock.Mock(spec=["start", "ChangeDutyCycle", "stop"])
+    GPIO.PWM.return_value = pwm
+    pump = Pump(channel=1)
+    assert pump.set_speed(0.5) is True
+    pwm.stop.side_effect = RuntimeError("hard stop failure")
+
+    with pytest.raises(RuntimeError, match="hard stop failure"):
+        pump._stop()
+
+    GPIO.setup.assert_any_call(pump._gpio_pin, GPIO.IN)
+    assert pump._hardware_stopped is False
+    assert pump_module._global_lock_owner is pump
+    assert global_lock.locked() is True
+
+    pwm.stop.side_effect = None
+    pump._stop()
+
+    assert pwm.stop.call_count == 2
+    assert pump._hardware_stopped is True
+    assert pump_module._global_lock_owner is None
+    assert global_lock.locked() is False
+
+
 def test_dose_validates_speed_before_starting_timer(GPIO, smbus, monkeypatch):
     from grow.pump import Pump
 

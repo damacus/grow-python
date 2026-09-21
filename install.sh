@@ -237,11 +237,6 @@ while [[ $# -gt 0 ]]; do
 		FORCE=true
 		shift
 		;;
-	-p|--python)
-		PYTHON=$2
-		shift
-		shift
-		;;
 	*)
 		if [[ $1 == -* ]]; then
 			printf "Unrecognised option: %s\n" "$1";
