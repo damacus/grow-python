@@ -4,11 +4,18 @@ import math
 import runpy
 import sys
 import types
+from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from PIL import Image
+from PIL import Image, ImageFont
+
+
+def test_monitor_font_resource_is_loadable():
+    font_path = files("font_roboto").joinpath("files/Roboto-Medium.ttf")
+    assert font_path.is_file()
+    assert ImageFont.truetype(str(font_path), 14).getbbox("Grow")
 
 
 def load_monitor(monkeypatch):
@@ -25,11 +32,27 @@ def load_monitor(monkeypatch):
     rpi.GPIO = gpio
 
     ltr559 = types.ModuleType("ltr559")
-    st7735 = types.ModuleType("ST7735")
+    st7735 = types.ModuleType("st7735")
+    font_roboto = types.ModuleType("font_roboto")
+
     monkeypatch.setitem(sys.modules, "RPi", rpi)
     monkeypatch.setitem(sys.modules, "RPi.GPIO", gpio)
     monkeypatch.setitem(sys.modules, "ltr559", ltr559)
-    monkeypatch.setitem(sys.modules, "ST7735", st7735)
+    monkeypatch.setitem(sys.modules, "st7735", st7735)
+    monkeypatch.setitem(sys.modules, "font_roboto", font_roboto)
+
+    class FontResources:
+        def joinpath(self, _name):
+            return Path("font_roboto/files/Roboto-Medium.ttf")
+
+    monkeypatch.setattr(
+        "importlib.resources.files", lambda _package: FontResources()
+    )
+    default_font = ImageFont.load_default()
+    monkeypatch.setattr(
+        "PIL.ImageFont.truetype",
+        lambda *_args, **_kwargs: default_font,
+    )
 
     for module_name in tuple(sys.modules):
         if module_name == "grow" or module_name.startswith("grow."):
@@ -50,7 +73,9 @@ def test_view_layout_works_with_current_pillow(monkeypatch):
     assert image.getpixel((0, 60))[:3] == (0, 0, 0)
     view.clear()
     view.label("Y", "OK", bgcolor=(255, 0, 0))
-    assert image.getpixel((133, 61))[:3] == (255, 0, 0)
+    text_bbox = view._draw.textbbox((0, 0), "OK", font=view.font)
+    label_x = monitor["DISPLAY_WIDTH"] - (text_bbox[2] - text_bbox[0] + 8)
+    assert image.getpixel((label_x, 61))[:3] == (255, 0, 0)
     assert image.getpixel((133, 60))[:3] == (0, 0, 0)
 
     draw_text = Mock(wraps=view._draw.text)

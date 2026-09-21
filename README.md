@@ -26,13 +26,15 @@ For Debian 13, use the checkout installation below.
 
 ## Install this checkout and configure dependencies:
 
-* `git clone https://github.com/pimoroni/grow-python`
+* `git clone https://github.com/damacus/grow-python`
 * `cd grow-python`
 * `./install.sh --unstable`
 
 Run the installer as your normal user. It creates a clean interactive
 environment at `$HOME/.virtualenvs/pimoroni` and installs the example Python
-dependencies. The service installer uses its separate root-owned environment at
+dependencies. With `--unstable`, the installer installs the package from the
+current checkout (`pip install .`) rather than from PyPI. The service installer
+uses its separate root-owned environment at
 `/opt/grow-monitor/venv`.
 
 Run `./install.sh` from this checkout in either mode: it needs the bundled

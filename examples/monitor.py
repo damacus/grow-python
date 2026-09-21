@@ -5,17 +5,19 @@ import pathlib
 import sys
 import threading
 import time
+from importlib.resources import files
 
 import ltr559
 import RPi.GPIO as GPIO
-import ST7735
+import st7735 as ST7735
 import yaml
-from fonts.ttf import RobotoMedium as UserFont
 from PIL import Image, ImageDraw, ImageFont
 
 from grow import Piezo
 from grow.moisture import Moisture
 from grow.pump import Pump
+
+UserFont = str(files("font_roboto").joinpath("files/Roboto-Medium.ttf"))
 
 FPS = 10
 
