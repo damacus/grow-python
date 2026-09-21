@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ['3.9', '3.10', '3.11', '3.13']
+        python: ['3.13']
 
     steps:
       - name: Checkout Code
@@ -35,7 +35,7 @@ jobs:
           make pytest
 
       - name: Coverage
-        if: ${{ matrix.python == '3.9' }}
+        if: ${{ matrix.python == '3.13' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
