@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 
 FORCE=false
 LIBRARY_NAME=`grep -m 1 name pyproject.toml | awk -F" = " '{print substr($2,2,length($2)-2)}'`
@@ -7,7 +8,7 @@ PYTHON="python"
 
 
 venv_check() {
-	PYTHON_BIN=`which $PYTHON`
+	PYTHON_BIN=$(command -v "$PYTHON" || true)
 	if [[ $VIRTUAL_ENV == "" ]] || [[ $PYTHON_BIN != $VIRTUAL_ENV* ]]; then
 		printf "This script should be run in a virtual Python environment.\n"
 		exit 1
@@ -15,7 +16,7 @@ venv_check() {
 }
 
 user_check() {
-	if [ $(id -u) -eq 0 ]; then
+	if [ "$(id -u)" -eq 0 ]; then
 		printf "Script should not be run as root. Try './uninstall.sh'\n"
 		exit 1
 	fi
@@ -61,11 +62,11 @@ user_check
 venv_check
 
 printf "Uninstalling for Python 3...\n"
-$PYTHON -m pip uninstall $LIBRARY_NAME
+"$PYTHON" -m pip uninstall -y "$LIBRARY_NAME" || exit 1
 
-if [ -d $RESOURCES_DIR ]; then
+if [ -d "$RESOURCES_DIR" ]; then
 	if confirm "Would you like to delete $RESOURCES_DIR?"; then
-		rm -r $RESOURCES_DIR
+		rm -r "$RESOURCES_DIR" || exit 1
 	fi
 fi
 

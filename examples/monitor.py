@@ -90,7 +90,8 @@ class View:
         if position not in ["A", "B", "X", "Y"]:
             raise ValueError(f"Invalid label position {position}")
 
-        text_w, text_h = self._draw.textsize(text, font=self.font)
+        text_bbox = self._draw.textbbox((0, 0), text, font=self.font)
+        text_w = text_bbox[2] - text_bbox[0]
         text_h = 11
         text_w += margin * 2
         text_h += margin * 2
@@ -143,7 +144,7 @@ class View:
 
                 while (
                     len(words) > 0
-                    and font.getsize(" ".join(line + [words[0]]))[0] <= width
+                    and font.getlength(" ".join(line + [words[0]])) <= width
                 ):
                     line.append(words.pop(0))
 
@@ -161,7 +162,7 @@ class View:
                 bounds = [x2, y, x1, y + len(lines) * line_height]
 
                 for line in lines:
-                    line_width = font.getsize(line)[0]
+                    line_width = font.getlength(line)
                     x = int(x1 + (width / 2) - (line_width / 2))
                     bounds[0] = min(bounds[0], x)
                     bounds[2] = max(bounds[2], x + line_width)
@@ -222,7 +223,8 @@ class MainView(View):
         self.icon(icon_channel, (x, label_y), (200, 200, 200) if active else (64, 64, 64))
 
         # TODO: replace number text with graphic
-        tw, th = self.font.getsize(str(channel.channel))
+        channel_bbox = self._draw.textbbox((0, 0), str(channel.channel), font=self.font)
+        tw = channel_bbox[2] - channel_bbox[0]
         self._draw.text(
             (x + int(math.ceil(8 - (tw / 2.0))), label_y + 1),
             str(channel.channel),
@@ -479,7 +481,8 @@ class DetailView(ChannelView):
 
         self.icon(icon_channel, (label_x, label_y), (200, 200, 200))
 
-        tw, th = self.font.getsize(str(self.channel.channel))
+        channel_bbox = self._draw.textbbox((0, 0), str(self.channel.channel), font=self.font)
+        tw = channel_bbox[2] - channel_bbox[0]
         self._draw.text(
             (label_x + int(math.ceil(8 - (tw / 2.0))), label_y + 1),
             str(self.channel.channel),

@@ -9,7 +9,10 @@ Designed as a tiny valet for your plants, Grow HAT mini will monitor the soil mo
 
 # Installing
 
-You're best using the "One-line" install method.
+The installer supports Raspberry Pi OS, including Trixie, and Debian 13
+installed on Raspberry Pi hardware. It needs a Raspberry Pi boot configuration
+at `/boot/firmware/config.txt` or `/boot/config.txt`; systems without either
+file are rejected before any hardware changes are made.
 
 ## One-line (Installs from GitHub)
 
@@ -19,29 +22,49 @@ curl -sSL https://get.pimoroni.com/grow | bash
 
 **Note** report issues with one-line installer here: https://github.com/pimoroni/get
 
-## Or... Install and configure dependencies from GitHub:
+## Install this checkout and configure dependencies:
 
 * `git clone https://github.com/pimoroni/grow-python`
 * `cd grow-python`
-* `sudo ./install.sh`
+* `./install.sh --unstable`
 
-**Note** Raspbian Lite users may first need to install git: `sudo apt install git`
+Run the installer as your normal user. It creates a clean interactive
+environment at `$HOME/.virtualenvs/pimoroni` and installs the example Python
+dependencies. The service installer uses its separate root-owned environment at
+`/opt/grow-monitor/venv`.
+
+The installer enables I2C and SPI and adds the following lines under the
+effective `[all]` section of the detected boot configuration:
+
+```
+dtparam=i2c_arm=on
+dtparam=spi=on
+dtoverlay=spi0-cs,cs0_pin=14
+```
+
+It installs `rpi-lgpio` as the GPIO provider. Do not install `RPi.GPIO` in the
+same environment: both packages provide `RPi.GPIO`, and the clean venv avoids
+that conflict. The native `lgpio` library is installed from the Raspberry Pi
+package repository when available, or built from the pinned upstream source by
+`scripts/install-native-gpio.sh`.
 
 ## Or... Install from PyPi and configure manually:
 
 * Install dependencies:
 
 ```
-sudo apt install python3-setuptools python3-pip python3-yaml python3-smbus python3-pil python3-spidev python3-rpi.gpio
+python3 -m venv "$HOME/.virtualenvs/pimoroni"
+source "$HOME/.virtualenvs/pimoroni/bin/activate"
+python -m pip install growhat
+python -m pip install -r requirements-examples.txt
 ```
 
-* Run `sudo pip3 install growhat`
+* Run the commands inside the clean environment.
 
-**Note** this won't perform any of the required configuration changes on your Pi, you may additionally need to:
+Manual installation does not perform the required boot configuration. Add the
+three lines above under `[all]`, then reboot. It also needs the native `lgpio`
+library and must not have `RPi.GPIO` installed in the same environment.
 
-* Enable i2c: `sudo raspi-config nonint do_i2c 0`
-* Enable SPI: `sudo raspi-config nonint do_spi 0`
-* Add the following to `/boot/config.txt`: `dtoverlay=spi0-cs,cs0_pin=14`
 
 ## Monitoring
 

@@ -1,40 +1,53 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-user_check() {
-	if [ $(id -u) -ne 0 ]; then
-		printf "Script must be run as root. Try 'sudo ./install.sh'\n"
-		exit 1
-	fi
-}
+set -Eeuo pipefail
 
-success() {
-	echo -e "$(tput setaf 2)$1$(tput sgr0)"
-}
+if [[ "$(id -u)" -ne 0 ]]; then
+    printf 'Script must be run as root. Try: sudo %s\n' "$0" >&2
+    exit 1
+fi
 
-inform() {
-	echo -e "$(tput setaf 6)$1$(tput sgr0)"
-}
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+ASSET_DIR=/usr/share/grow-monitor
+VENV_DIR=/opt/grow-monitor/venv
+SERVICE_NAME=grow-monitor.service
+NATIVE_GPIO_INSTALLER="${REPOSITORY_DIR}/scripts/install-native-gpio.sh"
 
-warning() {
-	echo -e "$(tput setaf 1)$1$(tput sgr0)"
-}
+if [[ ! -x "${NATIVE_GPIO_INSTALLER}" ]]; then
+    printf 'Missing native GPIO prerequisite helper: %s\n' "${NATIVE_GPIO_INSTALLER}" >&2
+    exit 1
+fi
+"${NATIVE_GPIO_INSTALLER}"
 
-user_check
+printf 'Installing Grow Monitor assets...\n'
+install -d -m 0755 "${ASSET_DIR}/icons" /opt/grow-monitor
+cp -a "${REPOSITORY_DIR}/examples/icons/." "${ASSET_DIR}/icons/"
+install -m 0755 "${REPOSITORY_DIR}/examples/monitor.py" "${ASSET_DIR}/monitor.py"
+ln -sfn "${ASSET_DIR}/monitor.py" /usr/bin/grow-monitor
 
-inform "Copying icons to /usr/share/grow-monitor...\n"
-mkdir -p /usr/share/grow-monitor/icons
-cp ../examples/icons/* /usr/share/grow-monitor/icons
+# Keep settings made through the UI when the service is reinstalled.
+if [[ ! -e /etc/default/grow ]]; then
+    install -D -m 0644 "${REPOSITORY_DIR}/examples/settings.yml" /etc/default/grow
+fi
 
-inform "Installing grow-monitor to /usr/bin/grow-monitor...\n"
-cp ../examples/monitor.py /usr/bin/grow-monitor
-chmod +x /usr/bin/grow-monitor
+printf 'Creating service virtual environment...\n'
+if ! python3 -m venv "${VENV_DIR}"; then
+    printf 'python3-venv is required. Install it with apt and run this script again.\n' >&2
+    exit 1
+fi
+"${VENV_DIR}/bin/python" -m pip install --requirement "${REPOSITORY_DIR}/requirements-examples.txt"
+"${VENV_DIR}/bin/python" -m pip install "${REPOSITORY_DIR}"
+chown -R root:root "${VENV_DIR}"
 
-inform "Installing settings to /etc/default/grow...\n"
-cp ../examples/settings.yml /etc/default/grow
+printf 'Installing systemd service...\n'
+install -m 0644 "${SCRIPT_DIR}/grow-monitor.service" "/etc/systemd/system/${SERVICE_NAME}"
+systemctl daemon-reload
+systemctl enable "${SERVICE_NAME}"
+if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    systemctl restart "${SERVICE_NAME}"
+else
+    systemctl start "${SERVICE_NAME}"
+fi
 
-inform "Installing systemd service...\n"
-cp grow-monitor.service /etc/systemd/system/
-systemctl reenable grow-monitor.service
-systemctl start grow-monitor.service
-
-inform "\nTo see grow debug output, run: \"journalctl --no-pager --unit grow-monitor\"\n"
+printf '\nTo see Grow debug output, run: journalctl --no-pager --unit %s\n' "${SERVICE_NAME}"
