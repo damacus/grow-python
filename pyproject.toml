@@ -7,7 +7,7 @@ name = "growhat"
 dynamic = ["version", "readme"]
 description = "Grow HAT Mini. A plant valet add-on for the Raspberry Pi"
 license = {file = "LICENSE"}
-requires-python = ">= 3.7"
+requires-python = ">= 3.9"
 authors = [
     { name = "Philip Howard", email = "phil@pimoroni.com" },
     { name = "Paul Beech", email = "paul@pimoroni.com" },
@@ -25,11 +25,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development",
     "Topic :: Software Development :: Libraries",
@@ -40,7 +39,12 @@ dependencies = [
 	"st7735>=0.0.5",
 	"pyyaml",
 	"fonts",
-	"font-roboto"
+	"font-roboto",
+	"rpi-lgpio>=0.6",
+	"smbus>=1.1.post2",
+	"spidev>=3.6",
+	"gpiod>=2,<3",
+	"gpiodevice>=0.1"
 ]
 
 [project.urls]
@@ -120,6 +124,16 @@ ignore = [
 ]
 
 [tool.pimoroni]
-apt_packages = []
-configtxt = []
+apt_packages = [
+    "python3-venv",
+    "python3-dev",
+    "swig",
+    "ca-certificates",
+    "git"
+]
+configtxt = [
+    "dtparam=i2c_arm=on",
+    "dtparam=spi=on",
+    "dtoverlay=spi0-cs,cs0_pin=14"
+]
 commands = []

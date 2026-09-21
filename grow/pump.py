@@ -12,6 +12,8 @@ PUMP_MAX_DUTY = 90
 
 
 global_lock = threading.Lock()
+_global_lock_state = threading.Lock()
+_global_lock_owner = None
 
 
 class Pump(object):
@@ -34,27 +36,98 @@ class Pump(object):
         self._pwm = GPIO.PWM(self._gpio_pin, PUMP_PWM_FREQ)
         self._pwm.start(0)
 
+        self._state_lock = threading.RLock()
         self._timeout = None
+        self._dose_generation = 0
+        self._dose_active = False
+        self._speed = 0.0
+        self._hardware_stopped = False
 
         atexit.register(self._stop)
 
     def _stop(self):
-        self._pwm.stop(0)
-        GPIO.setup(self._gpio_pin, GPIO.IN)
+        """Stop the PWM output and release this pump's global lock."""
+        with self._state_lock:
+            if self._hardware_stopped:
+                return
+
+            graceful_error = None
+            try:
+                # Keep the global lock until both hard-teardown operations
+                # have confirmed that this pump no longer owns the output.
+                self._stop_locked(release_lock=False)
+            except Exception as error:
+                graceful_error = error
+
+            teardown_errors = []
+            try:
+                self._pwm.stop()
+            except Exception as error:
+                teardown_errors.append(error)
+            try:
+                GPIO.setup(self._gpio_pin, GPIO.IN)
+            except Exception as error:
+                teardown_errors.append(error)
+
+            if not teardown_errors:
+                self._hardware_stopped = True
+                self._speed = 0.0
+                self._release_global_lock()
+
+            # A failed graceful duty-cycle reset is still the most useful
+            # error to report when the hard teardown succeeded.  If it did
+            # not fail, report the first hard-teardown error so callers can
+            # retry while the pump still owns the global lock.
+            if graceful_error is not None:
+                raise graceful_error
+            if teardown_errors:
+                raise teardown_errors[0]
+
+    def _release_global_lock(self):
+        """Release the global lock when this pump owns it."""
+        global _global_lock_owner
+
+        with _global_lock_state:
+            if _global_lock_owner is self:
+                _global_lock_owner = None
+                global_lock.release()
+
+    def _set_speed_locked(self, speed, release_lock=True):
+        """Set the speed while holding ``_state_lock``."""
+        global _global_lock_owner
+
+        if speed == 0:
+            # Keep ownership until the hardware confirms that it stopped.
+            self._pwm.ChangeDutyCycle(0)
+            if release_lock:
+                self._release_global_lock()
+            self._speed = 0.0
+            return True
+
+        acquired = False
+        with _global_lock_state:
+            if _global_lock_owner is not self:
+                if not global_lock.acquire(blocking=False):
+                    return False
+                _global_lock_owner = self
+                acquired = True
+
+        try:
+            self._pwm.ChangeDutyCycle(int(PUMP_MAX_DUTY * speed))
+        except Exception:
+            if acquired:
+                self._release_global_lock()
+            raise
+        self._speed = speed
+        return True
 
     def set_speed(self, speed):
         """Set pump speed (PWM duty cycle)."""
         if speed > 1.0 or speed < 0:
             raise ValueError("Speed must be between 0 and 1")
 
-        if speed == 0:
-            global_lock.release()
-        elif not global_lock.acquire(blocking=False):
-            return False
-
-        self._pwm.ChangeDutyCycle(int(PUMP_MAX_DUTY * speed))
-        self._speed = speed
-        return True
+        with self._state_lock:
+            return self._set_speed_locked(speed)
 
     def get_speed(self):
         """Return Pump speed (PWM duty cycle)."""
@@ -62,10 +135,28 @@ class Pump(object):
 
     def stop(self):
         """Stop the pump."""
-        if self._timeout is not None:
-            self._timeout.cancel()
+        with self._state_lock:
+            self._stop_locked()
+
+    def _stop_locked(self, release_lock=True):
+        """Stop the pump while holding ``_state_lock``."""
+        self._dose_generation += 1
+        timeout = self._timeout
+        self._timeout = None
+        self._dose_active = False
+        if timeout is not None:
+            timeout.cancel()
+        self._set_speed_locked(0, release_lock=release_lock)
+
+    def _timer_expired(self, generation):
+        """Stop only the dose represented by ``generation``."""
+        with self._state_lock:
+            if generation != self._dose_generation:
+                return
             self._timeout = None
-        self.set_speed(0)
+            self._dose_active = False
+            self._dose_generation += 1
+            self._set_speed_locked(0)
 
     def dose(self, speed, timeout=0.1, blocking=True, force=False):
         """Pulse the pump for timeout seconds.
@@ -76,21 +167,54 @@ class Pump(object):
 
         """
 
-        if blocking:
-            if self.set_speed(speed):
-                time.sleep(timeout)
-                self.stop()
+        if speed > 1.0 or speed < 0:
+            raise ValueError("Speed must be between 0 and 1")
+
+        with self._state_lock:
+            if self._dose_active and (blocking or not force):
+                return False
+
+            if not self._set_speed_locked(speed):
+                return False
+
+            old_timeout = self._timeout
+            self._dose_generation += 1
+            generation = self._dose_generation
+            self._timeout = None
+            self._dose_active = True
+            if old_timeout is not None:
+                old_timeout.cancel()
+
+            if not blocking:
+                try:
+                    timer = threading.Timer(
+                        timeout, self._timer_expired, args=(generation,)
+                    )
+                    self._timeout = timer
+                    timer.start()
+                except Exception:
+                    try:
+                        self._stop_generation(generation)
+                    except Exception:
+                        raise
+                    raise
                 return True
 
-        else:
-            if self._timeout is not None:
-                if self._timeout.is_alive():
-                    if force:
-                        self._timeout.cancel()
+        try:
+            time.sleep(timeout)
+            return True
+        finally:
+            self._stop_generation(generation)
 
-            self._timeout = threading.Timer(timeout, self.stop)
-            if self.set_speed(speed):
-                self._timeout.start()
-                return True
-
-        return False
+    def _stop_generation(self, generation):
+        """Stop a blocking dose unless a newer dose owns this pump."""
+        with self._state_lock:
+            if generation != self._dose_generation:
+                return
+            timeout = self._timeout
+            self._timeout = None
+            self._dose_active = False
+            self._dose_generation += 1
+            if timeout is not None:
+                timeout.cancel()
+            self._set_speed_locked(0)
